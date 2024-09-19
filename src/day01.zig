@@ -37,7 +37,7 @@ fn part2() !void {
     }
 }
 
-pub export fn run() void {
+pub export fn day01() void {
     part1() catch unreachable;
     part2() catch unreachable;
 }
