@@ -7,7 +7,7 @@ fn part1() !void {
 }
 
 fn part2() !void {
-    std.debug.print("part2: {}\n", .{});
+    std.debug.print("part2: \n", .{});
 }
 
 pub export fn dayXX() void {
