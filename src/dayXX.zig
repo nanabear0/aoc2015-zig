@@ -10,7 +10,7 @@ fn part2() !void {
     std.debug.print("part2: {}\n", .{});
 }
 
-pub export fn run() void {
+pub export fn dayXX() void {
     part1() catch unreachable;
     part2() catch unreachable;
 }
