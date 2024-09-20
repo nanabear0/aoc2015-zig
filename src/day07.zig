@@ -132,7 +132,7 @@ fn getValueOfWire(wires: *WireMap, name: []const u8) u16 {
     return wire.value.?;
 }
 
-fn part1() !void {
+fn part1() !u16 {
     var input_split = std.mem.split(u8, input, "\n");
     var wires = WireMap.init(std.heap.page_allocator);
     defer wires.deinit();
@@ -144,13 +144,26 @@ fn part1() !void {
     }
 
     std.debug.print("part1: {d}\n", .{getValueOfWire(&wires, "a")});
+
+    return wires.get("a").?.value.?;
 }
 
-fn part2() !void {
-    std.debug.print("part2: \n", .{});
+fn part2(p1_result: u16) !void {
+    var input_split = std.mem.split(u8, input, "\n");
+    var wires = WireMap.init(std.heap.page_allocator);
+    defer wires.deinit();
+
+    var i: u32 = 1;
+    while (input_split.next()) |line| : (i += 1) {
+        const wire = try Wire.parse(line);
+        try wires.put(wire.i_am, wire);
+    }
+    wires.getPtr("b").?.value = p1_result;
+
+    std.debug.print("part2: {d}\n", .{getValueOfWire(&wires, "a")});
 }
 
 pub export fn day07() void {
-    part1() catch unreachable;
-    part2() catch unreachable;
+    const p1_result = part1() catch unreachable;
+    part2(p1_result) catch unreachable;
 }
