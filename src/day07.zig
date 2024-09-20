@@ -15,20 +15,34 @@ const Gate = enum {
         if (std.mem.eql(u8, "AND", str)) return .AND;
         if (std.mem.eql(u8, "LSHIFT", str)) return .LSHIFT;
         if (std.mem.eql(u8, "RSHIFT", str)) return .RSHIFT;
-        if (std.mem.eql(u8, "DIRECT", str)) return .NOT;
-        if (std.mem.eql(u8, "INPUT", str)) return .NOT;
+        if (std.mem.eql(u8, "NOT", str)) return .NOT;
+        if (std.mem.eql(u8, "DIRECT", str)) return .DIRECT;
+        if (std.mem.eql(u8, "INPUT", str)) return .INPUT;
 
         unreachable;
     }
 };
 
+const InputTypeEnum = enum { int, string };
+const Input = union(InputTypeEnum) {
+    int: u16,
+    string: []const u8,
+    pub fn fromStr(str: []const u8) Input {
+        const int_value = std.fmt.parseInt(u16, str, 10) catch {
+            return Input{
+                .string = str,
+            };
+        };
+        return Input{ .int = int_value };
+    }
+};
+
 const Wire = struct {
     i_am: []const u8,
-    in1: ?[]const u8,
-    in2: ?[]const u8,
-    in2v: ?u32,
+    in1: ?Input,
+    in2: ?Input,
     gate: Gate,
-    value: ?u32,
+    value: ?u16,
     fn parse(str: []const u8) !Wire {
         var arrow_split = std.mem.split(u8, str, " -> ");
         const left = arrow_split.next().?;
@@ -37,25 +51,22 @@ const Wire = struct {
 
         switch (cnt) {
             0 => { // DIRECT, INPUT
-                if (std.ascii.isAlphabetic(left[0])) { // DIRECT
-                    return .{ .i_am = right, .in1 = left, .in2 = null, .in2v = null, .gate = .DIRECT, .value = null };
-                } else { // INPUT
-                    return .{
-                        .i_am = right,
-                        .in1 = null,
-                        .in2 = null,
-                        .in2v = null,
-                        .gate = .INPUT,
-                        .value = try std.fmt.parseInt(u32, left, 10),
-                    };
+                // Assume DIRECT
+                var wire: Wire = .{ .i_am = right, .in1 = Input.fromStr(left), .in2 = null, .gate = .DIRECT, .value = null };
+                switch (wire.in1.?) {
+                    .int => |*value| { // Update to INPUT
+                        wire.value = value.*;
+                        wire.gate = .INPUT;
+                    },
+                    else => {},
                 }
+                return wire;
             },
             1 => { // NOT
                 return .{
                     .i_am = right,
-                    .in1 = left[4..],
+                    .in1 = Input.fromStr(left[4..]),
                     .in2 = null,
-                    .in2v = null,
                     .gate = .NOT,
                     .value = null,
                 };
@@ -63,29 +74,14 @@ const Wire = struct {
             2 => {
                 // OR, AND, LSHIFT, RSHIFT
                 var left_split = std.mem.split(u8, left, " ");
-                const in1 = left_split.next().?;
-                const op = Gate.fromStr(left_split.next().?);
-                const in2 = left_split.next().?;
 
-                if (op == Gate.LSHIFT or op == Gate.RSHIFT) {
-                    return .{
-                        .i_am = right,
-                        .in1 = in1,
-                        .gate = op,
-                        .in2 = null,
-                        .in2v = try std.fmt.parseInt(u32, in2, 10),
-                        .value = null,
-                    };
-                } else {
-                    return .{
-                        .i_am = right,
-                        .in1 = in1,
-                        .gate = op,
-                        .in2 = in2,
-                        .in2v = null,
-                        .value = null,
-                    };
-                }
+                return .{
+                    .i_am = right,
+                    .in1 = Input.fromStr(left_split.next().?),
+                    .gate = Gate.fromStr(left_split.next().?),
+                    .in2 = Input.fromStr(left_split.next().?),
+                    .value = null,
+                };
             },
             else => unreachable,
         }
@@ -94,20 +90,60 @@ const Wire = struct {
     }
 };
 
+const WireMap = std.StringHashMap(Wire);
+
+fn getValueOfWireOrStaticValue(wires: *WireMap, target: Input) u16 {
+    switch (target) {
+        .int => |*int| return int.*,
+        .string => |*string| return getValueOfWire(wires, string.*),
+    }
+}
+
+fn getValueOfWire(wires: *WireMap, name: []const u8) u16 {
+    var wire = wires.getPtr(name).?;
+    if (wire.value) |value| return value;
+
+    switch (wire.gate) {
+        .OR => {
+            wire.value = getValueOfWireOrStaticValue(wires, wire.in1.?) |
+                getValueOfWireOrStaticValue(wires, wire.in2.?);
+        },
+        .AND => {
+            wire.value = getValueOfWireOrStaticValue(wires, wire.in1.?) &
+                getValueOfWireOrStaticValue(wires, wire.in2.?);
+        },
+        .LSHIFT => {
+            wire.value = getValueOfWireOrStaticValue(wires, wire.in1.?) <<
+                @intCast(getValueOfWireOrStaticValue(wires, wire.in2.?));
+        },
+        .RSHIFT => {
+            wire.value = getValueOfWireOrStaticValue(wires, wire.in1.?) >>
+                @intCast(getValueOfWireOrStaticValue(wires, wire.in2.?));
+        },
+        .NOT => {
+            wire.value = ~getValueOfWireOrStaticValue(wires, wire.in1.?);
+        },
+        .DIRECT => {
+            wire.value = getValueOfWireOrStaticValue(wires, wire.in1.?);
+        },
+        .INPUT => unreachable, // should already have a value
+    }
+
+    return wire.value.?;
+}
+
 fn part1() !void {
     var input_split = std.mem.split(u8, input, "\n");
-    var wires = std.StringHashMap(Wire).init(std.heap.page_allocator);
+    var wires = WireMap.init(std.heap.page_allocator);
     defer wires.deinit();
 
     var i: u32 = 1;
     while (input_split.next()) |line| : (i += 1) {
         const wire = try Wire.parse(line);
-        std.debug.print("{d}: {any}\n", .{ i, wire });
-
         try wires.put(wire.i_am, wire);
     }
 
-    std.debug.print("part1: \n", .{});
+    std.debug.print("part1: {d}\n", .{getValueOfWire(&wires, "a")});
 }
 
 fn part2() !void {
